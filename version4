@@ -1,0 +1,360 @@
+<?php 
+function userList2($location, $months){
+//$location = "Central QLD West"; 
+
+if ($months==0){$months=3;}
+$month_str="-".$months." Months";
+//echo $month_str;
+$date_after =  date("d.m.Y", strtotime($month_str));
+echo "Date After ".$date_after;
+echo "<h1>Report For ".$location."  </h1>";
+echo "<p>Sorted by latest start date first.</p>";
+
+// The Query Arguments
+
+if ($location == "All"){
+    
+    $args = array(
+        'role'          => 'subscriber',
+        'date_query'    => array(
+            array(
+                'after'     => $date_after,
+                'inclusive' => true,
+            ),
+        ),
+        'orderby' => array(
+            'user_registered' => 'DESC'
+        ),
+        'fields' => 'all'
+    );
+    
+} else {
+    $args = array(
+        'meta_key' => 'current_location', 'meta_value' => $location , 'meta_compare' => 'like',
+        'role'          => 'subscriber',
+        'date_query'    => array(
+            array(
+                'after'     => $date_after,
+                'inclusive' => true,
+            ),
+        ),
+        'orderby' => array(
+            'user_registered' => 'DESC'
+        ),
+        'fields' => 'all'
+    );
+    
+    
+}
+
+
+// The Query
+$user_query = new WP_User_Query( $args );
+//print_r( $user_query );
+
+// User Count
+$user_count = $user_query->get_total();
+echo '<p>Users in this report: '.$user_count.'</p>';
+
+// Output array for generating HTML table
+$Output = [];
+// Output Headings Row
+$Output[0]=array(
+    "ID"=> "ID",
+    "Name"=>"Name",
+    "Registered"=>"Registered",
+    "Current_Course"=>"Current Course",
+    "Course_Summary"=>"Course Summary",
+    "Course_Status"=>"Course Status",
+    "Course_Percent"=>"Course Percent",
+    "Course_Complete_Date"=>"Complete Date",
+    "Last_Login_Date"=>"Last Login Date",
+    "Phone"=>"Phone",
+    "Email"=>"Email",
+    "Trainer"=>"Trainer"
+
+);
+
+
+
+$LineNum=0;  //initialise line number
+
+// User Loop
+
+if ( ! empty( $user_query->get_results() ) ) {
+    
+    foreach ( $user_query->get_results() as $user ) {
+      // Each user output:
+      	// ID, Name F/L, Location, Enrol Date, Trainer F/L
+    // Line number
+
+    $user_id =  $user->ID;
+    $userDataAll = get_userdata( $user_id );
+    //echo '<pre>';
+    //print_r( $userDataAll );
+    //echo '</pre>';
+    
+   // Get GroundHogg fields 
+   // from Coling Longworth
+   // https://gist.github.com/MCKLtech/8b35f2d3fd0cb6c441b90c9d266b8d6d 
+
+       //$fields = \Groundhogg\get_mappable_fields();
+        //echo '<pre>';
+        //print_r($fields);
+        //echo '</pre>';
+   
+
+   
+   $contact = new \Groundhogg\Contact($user->user_email);
+
+    if($contact->exists()) {
+        
+        // Get a list of contact ids
+        $tags = $contact->get_tags();
+        // to get a list of ID >> Name
+        $tag_id_to_name = [];
+        // Populate the list
+        foreach ( $tags as $tag_id ) {
+        // create a tag object based on the ID
+        $tag = new \Groundhogg\Tag( $tag_id );
+        $tag_id_to_name[ $tag_id ] = $tag->get_name();
+ //   echo '<pre>';
+ //   print_r( $tag_id_to_name );
+ //   echo '</pre>';
+        }
+
+    $assessment_date = $contact->get_meta('proposed_practical_date', true);
+    $bnumber = $contact->get_meta('bnumber', true);
+    $bdate = $contact->get_meta('bdate', true);
+    $bpnumber = $contact->get_meta('bpnumber', true);
+    $bpdate = $contact->get_meta('bpdate', true);
+    $gh_town_suburb = $contact->get_meta('town_suburb', true);
+    $gh_user_id = $contact['ID'];
+    
+    if($assessment_date) {
+        /*
+         * Convert to timestamp for ease of use
+         */
+        $timestamp = strtotime($assessment_date);
+    }
+    
+    //echo "GH: ".$gh_user_id." ".$assessment_date." ". $timestamp." ". $bnumber." ". $bpnumber;
+    //echo '<pre>';
+    //print_r( $contact );
+    //echo '</pre>';
+
+    
+
+    // Get all user meta data, specifically to get course progress serialised
+    $all_meta_for_user = array_map( function( $a ){ return $a[0]; }, get_user_meta( $user_id ) );
+    //echo '<pre>';
+    //print_r( $all_meta_for_user );
+    //echo '</pre>';
+    
+    $seshKey  = "session_tokens";
+      $sessArray = [];
+      $userSess = [];
+      $LastLoginDate = 0;
+      
+    
+    
+    if (array_key_exists($seshKey,$all_meta_for_user)){  
+      
+      $Sesh = $all_meta_for_user['session_tokens'];
+    //print_r( $Sesh );
+      $userSess = get_user_meta( $user_id, 'session_tokens', false );
+
+        //echo '<pre>';
+      //var_dump( $userSess[0] );
+         //echo '</pre>';
+      //echo "<br>";
+      foreach($userSess[0] as $sess => $sessArray){
+       //echo "$sess = $sessArray <br>";
+        //var_dump($sessArray);
+     //echo = "Last Login = ".$sessArray['login']." <br>";
+     $LastLoginDate = $sessArray['login'];
+        
+      }
+      //var_dump($sessArray['login']);
+    } 
+      
+           	$LastLoginDate = getDate($LastLoginDate);
+          	//var_dump($courseCompleteDate);
+          	$LastLoginDate =  "".$LastLoginDate['year']."-".$LastLoginDate['mon']."-".$LastLoginDate['mday']."";
+     
+    
+    
+    // Serialised Course Data from Learn Dash
+    // Extract the serialised Learndash Course Progress (multiple course possible)
+    
+    // initialise variables before the loop
+    $user_progress = [];
+    $course = [];
+    $courseArray = [];
+    $courseTitle = [];
+    $courseItem = [];
+    $courseItemContent = [];
+    $courseProgress =[];
+    $courseStatus=[];
+    $coursePercent=[];
+    $courseStatusText=[];
+    $courseStatusStyle=[];
+    $courseCompleteDate=[];
+    
+
+    $key = '_sfwd-course_progress';
+    if (array_key_exists($key,$all_meta_for_user))
+    {
+        echo "<p>Course Progress Exists for ". $user->display_name." ".$user->ID."</p>";
+        // if exists extract courses from
+        //echo '<pre>';
+        print_r( $all_meta_for_user[$key] );
+        //echo '</pre>';
+
+        $user_progress = unserialize($all_meta_for_user[$key]);
+        //echo '<pre>';
+        echo '<p>';
+        print_r($user_progress);
+        echo '</p>';
+        //echo '</pre>';
+        $user_progress_count = count($user_progress);
+        echo "<p>#Number of courses: $user_progress_count</p>" ;
+        
+        // For each Course
+        $nCount=0;
+        foreach($user_progress as $course => $courseArray) {
+            $nCount++;
+ 			$courseTitle[$nCount] = get_post($course)->post_title;
+    		//echo "<p>#".$nCount." $course $courseTitle[$nCount]</p>";
+
+      		foreach($courseArray as $courseItem => $courseItemContent) {
+      			//echo "<p>$courseItem = ";print_r($courseItemContent); echo"</p>";
+
+        	}
+        	
+        	$courseCompleteDate[$nCount] = learndash_user_get_course_completed_date( $user_id,  $course );
+          	//echo " Date: $courseCompleteDate <br>";
+          	
+          	if ($courseCompleteDate[$nCount]){
+          	$courseCompleteDate[$nCount] = getDate($courseCompleteDate[$nCount]);
+          	} else {
+          	  $courseCompleteDate[$nCount] = 1;  
+          	    
+          	}
+          	
+          	//var_dump($courseCompleteDate);
+          	$courseCompleteDate[$nCount] =  "".$courseCompleteDate[$nCount]['year']."-".$courseCompleteDate[$nCount]['mon']."-".$courseCompleteDate[$nCount]['mday']."";
+
+          
+
+          	
+        	
+        	$coursePercent[$nCount] = intval($courseArray['completed']/$courseArray['total']*100);
+        	if($coursePercent[$nCount]==100){
+            	$courseStatus[$nCount] ="Complete";
+            	$courseStatusStyle[$nCount]="color:green; ";
+        	    
+        	}elseif($coursePercent[$nCount]==0){
+            	$courseStatus[$nCount] ="Not Started";
+            	$courseStatusStyle[$nCount]="color:orange; ";
+
+
+        	}else{
+            	$courseStatus[$nCount] ="In Progress";
+            	$courseStatusStyle[$nCount]="color:blue; ";
+        	    
+        	}
+        	
+        	
+        	
+        	$courseStatusText[$nCount]= "<span style='$courseStatusStyle[$nCount]' >"."Course Progress on ($course) $courseTitle[$nCount] $courseStatus[$nCount] $coursePercent[$nCount]% ".$courseArray['completed']." of ".$courseArray['total']."</span>";
+        	//echo "<p>$courseStatusText[$nCount]</p>";
+        	
+        }
+        
+        
+    }    else {
+        //echo "<p>Course Progress Does Not Exist for ". $user->display_name." ".$user->ID."</p>";
+        $courseStatusStyle[1]="color:orange; ";
+        $courseStatusText[1]="<span style='$courseStatusStyle[1]' >"."NOT STARTED"."</span>";
+    }
+    
+    
+    // Compile and Output user record
+    $UserRecord="";
+    $UserRecord=$UserRecord."ID: ".$user->ID; 
+    $UserRecord=$UserRecord.", GHID: ".$gh_user_id; 
+    $UserRecord=$UserRecord.", B#: ".$bnumber; 
+    $UserRecord=$UserRecord.", BP#: ".$bpnumber; 
+    $UserRecord=$UserRecord.", ". $user->display_name ;
+    $UserRecord=$UserRecord.", ". $user->current_location ;
+    $UserRecord=$UserRecord.", ". $user->town_suburb ;
+    $UserRecord=$UserRecord.", Practical ". $user->proposed_assessment_date ;
+    $UserRecord=$UserRecord.", ". " Enrolled ". $user->user_registered ;
+    $UserRecord=$UserRecord.", ". " Current Course ". $user->current_course ;
+    $nCount=0;
+    foreach($courseStatusText as $value){
+        $nCount++;
+        $UserRecord=$UserRecord.", ". $value;
+        $UserRecord=$UserRecord.", ". " Course Complete Date ". $courseCompleteDate[$nCount] ;
+
+		$LineNum++;
+	
+		$Output[$LineNum]["ID"]= "<a href='https://boatlicensing.com.au/courses3/wp-admin/user-edit.php?user_id=".$user->ID."'  target='_blank'>$user->ID</a>";
+
+		$Output[$LineNum]["Name"]= $user->display_name;
+		$Output[$LineNum]["Registered"]= $user->user_registered;
+		$Output[$LineNum]["Current_Course"]= $courseTitle[$nCount];
+		$Output[$LineNum]["Course_Summary"]= $value;
+		$Output[$LineNum]["Course_Status"]= $courseStatus[$nCount];
+		$Output[$LineNum]["Course_Percent"]= $coursePercent[$nCount];
+		$Output[$LineNum]["Course_Complete_Date"]= $courseCompleteDate[$nCount] ;
+		$Output[$LineNum]["Last_Login_Date"]= $LastLoginDate ;
+		$Output[$LineNum]["Phone"]= $user->phone;
+		$Output[$LineNum]["Email"]= $user->user_email;
+		$Output[$LineNum]["Trainer"]= $user->trainer_first_name." ". $user->trainer_last_name;
+
+
+
+    }
+    
+    
+    $UserRecord=$UserRecord.", ". " Last Login ". $LastLoginDate ;
+    $UserRecord=$UserRecord.", ". " Ph ". $user->phone ;
+    $UserRecord=$UserRecord.", ". " Email ". $user->user_email ;
+    $UserRecord=$UserRecord.", ". $user->trainer_first_name;
+    $UserRecord=$UserRecord." ". $user->trainer_last_name;
+    
+     
+}
+
+      $UserRecord= "<p style='".$UserRecordStyle."'>" ."#".$LineNum." ".$UserRecord. "</p>";
+    //echo  $UserRecord; 
+
+    
+    }
+    
+}
+// End of User Loop
+
+
+// Prepare HTML table from Output array
+
+echo "<table class='output-csv'><tbody>";
+
+$num=-1;
+	foreach($Output as $OutputRow ) {
+		$num++;
+		echo "<tr>";
+		echo "<td>#$num</td>";
+      		foreach($OutputRow as $key=>$OututRowItem ) {
+      			echo "<td>$OututRowItem</td>";
+        	}
+        	
+        echo "</tr>";	
+        }
+
+echo "</tbody></table >";
+
+return;
+}
